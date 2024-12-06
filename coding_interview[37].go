@@ -112,3 +112,17 @@ type IBlaster interface {
 // Associate "john@company.com" emails contact "jane@example.com" on 2024-01-01 with subject "Hello".
 // Associate "george@company.com" can only email contact "jane@example.com" on or after 2024-01-02.
 // Associate "john@company.com" can only email contact "jane@example.com" again on or after 2024-01-08, and the subject could not be "Hello".
+
+type Blaster struct {
+	mailer IMailer
+	repo   IRepo
+	worker IWorker
+}
+
+func NewBlaster(repo IRepo, mailer IMailer, worker IWorker) *Blaster {
+	return &Blaster{
+		repo:   repo,
+		mailer: mailer,
+		worker: worker,
+	}
+}
