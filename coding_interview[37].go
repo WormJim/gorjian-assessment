@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -182,6 +183,33 @@ func (b *Blaster) Queue(ctx context.Context) error {
 	return nil
 }
 
+// Process handles the business logic for sending an email and recording it
+func (b *Blaster) Process(ctx context.Context, blastContact *BlastContact) error {
+	// Validate BlastContact
+	if err := b.validateBlastContact(ctx, blastContact); err != nil {
+		return fmt.Errorf("blast contact validation failed: %w", err)
+	}
+
+	// Send email
+	if err := b.mailer.Send(ctx, blastContact); err != nil {
+		return fmt.Errorf("failed to send email: %w", err)
+	}
+
+	// Record the blast update
+	blastUpdate := &BlastUpdate{
+		BlastContactID: blastContact.ID,
+		CreatedAt:      time.Now(),
+	}
+
+	if err := b.repo.UpdateBlastUpdate(ctx, blastUpdate); err != nil {
+		return fmt.Errorf("failed to record blast update: %w", err)
+	}
+
+	return nil
+}
+
+/***** UTILITIES *****/
+
 // filterEligibleContacts filters contacts based on rules
 func (b *Blaster) filterEligibleContacts(contacts []*BlastContact) []*BlastContact {
 	var eligibleContacts []*BlastContact
@@ -195,4 +223,21 @@ func (b *Blaster) filterEligibleContacts(contacts []*BlastContact) []*BlastConta
 		eligibleContacts = append(eligibleContacts, contact)
 	}
 	return eligibleContacts
+}
+
+// validateBlastContact checks if the blast contact follows the rules
+func (b *Blaster) validateBlastContact(ctx context.Context, blastContact *BlastContact) error {
+	// Check if the associate exists
+	associate, err := b.repo.GetAssociate(ctx, blastContact.AssociateID)
+	if err != nil || associate == nil {
+		return errors.New("invalid associate ID")
+	}
+
+	// Check if the contact exists
+	contact, err := b.repo.GetContact(ctx, blastContact.ContactID)
+	if err != nil || contact == nil {
+		return errors.New("invalid contact ID")
+	}
+
+	return nil
 }
