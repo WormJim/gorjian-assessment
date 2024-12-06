@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"log"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -125,4 +128,71 @@ func NewBlaster(repo IRepo, mailer IMailer, worker IWorker) *Blaster {
 		mailer: mailer,
 		worker: worker,
 	}
+}
+
+// Queue adds the BlastContact Email Task to the Queue for processing
+// Returns a Map of Tasks to perform to listen to or inspect.
+func (b *Blaster) Queue(ctx context.Context) error {
+	associates, err := b.repo.ListAssociates(ctx) // Get full list of Associates
+	if err != nil {
+		return fmt.Errorf("failed to list associates: %w", err)
+	}
+
+	blastContacts, err := b.repo.ListBlastContacts(ctx) // Get Full list of contacts
+	if err != nil {
+		return fmt.Errorf("failed to list blast contacts: %w", err)
+	}
+
+	const maxEmailsPerDay = 100
+
+	for _, associate := range associates {
+		// Filter eligible blast contacts
+		eligibleContacts := b.filterEligibleContacts(blastContacts)
+
+		count := 0
+		for _, contact := range eligibleContacts {
+			if count >= maxEmailsPerDay {
+				break
+			}
+
+			// Create task for the blast contact
+			data := map[string]interface{}{
+				"blast_contact_id":   contact.ID,
+				"blast_associate_id": associate.ID,
+			}
+
+			// Serialize the map into JSON
+			payload, err := json.Marshal(data)
+			if err != nil {
+				log.Fatalf("failed to marshal payload: %v", err)
+			}
+
+			// Create the task with serialized payload
+			task := asynq.NewTask("process_email", payload)
+
+			_, err = b.worker.Enqueue(ctx, task)
+			if err != nil {
+				return fmt.Errorf("failed to enqueue task for blast contact ID %d: %w", contact.ID, err)
+			}
+
+			count++
+		}
+	}
+
+	return nil
+}
+
+// filterEligibleContacts filters contacts based on rules
+func (b *Blaster) filterEligibleContacts(contacts []*BlastContact) []*BlastContact {
+	var eligibleContacts []*BlastContact
+	for _, contact := range contacts {
+		// Skip if the contact was emailed within 7 days
+		if time.Since(contact.FollowUpDate) < 7*24*time.Hour {
+			continue
+		}
+
+		// Add contact to eligible list
+		eligibleContacts = append(eligibleContacts, contact)
+	}
+	return eligibleContacts
 }
